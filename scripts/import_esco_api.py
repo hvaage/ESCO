@@ -301,18 +301,29 @@ def main() -> int:
         return 2
 
     stats = ImportStats()
-    with psycopg.connect(database_url) as conn:
-        occupation_uris, stats.occupations, occupation_labels = import_search_entities(
-            conn, "occupation", args.language, args.page_limit, args.limit_occupations, args.sleep
-        )
-        skill_uris, stats.skills, skill_labels = import_search_entities(
-            conn, "skill", args.language, args.page_limit, args.limit_skills, args.sleep
-        )
-        stats.labels = occupation_labels + skill_labels
-        if not args.skip_relations:
-            stats.occupation_resources, stats.relations = import_occupation_relations(
-                conn, occupation_uris, args.language, args.limit_occupations, args.sleep
+    try:
+        with psycopg.connect(database_url) as conn:
+            occupation_uris, stats.occupations, occupation_labels = import_search_entities(
+                conn, "occupation", args.language, args.page_limit, args.limit_occupations, args.sleep
             )
+            skill_uris, stats.skills, skill_labels = import_search_entities(
+                conn, "skill", args.language, args.page_limit, args.limit_skills, args.sleep
+            )
+            stats.labels = occupation_labels + skill_labels
+            if not args.skip_relations:
+                stats.occupation_resources, stats.relations = import_occupation_relations(
+                    conn, occupation_uris, args.language, args.limit_occupations, args.sleep
+                )
+    except psycopg.OperationalError as exc:
+        print(f"Could not connect to Postgres: {exc}", file=sys.stderr)
+        if "db.wcaqfupjatnjwbgatzjv.supabase.co" in database_url:
+            print(
+                "Hint: the direct Supabase database host may be IPv6-only. "
+                "Use the pooler connection string from supabase/.temp/pooler-url "
+                "or the Supabase dashboard, and include your password.",
+                file=sys.stderr,
+            )
+        return 2
 
     print(json.dumps(stats.__dict__, indent=2, ensure_ascii=False))
     return 0

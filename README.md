@@ -38,11 +38,15 @@ supabase db push
 For direct import, create a local `.env` file:
 
 ```bash
-DATABASE_URL="postgresql://postgres:YOUR-PASSWORD@db.wcaqfupjatnjwbgatzjv.supabase.co:5432/postgres"
+DATABASE_URL="postgresql://postgres.wcaqfupjatnjwbgatzjv:YOUR-PASSWORD@aws-1-eu-west-2.pooler.supabase.com:5432/postgres?sslmode=require"
 ESCO_LANGUAGE="no"
 ```
 
 Do not commit `.env`.
+
+Supabase direct database hosts can be IPv6-only. If
+`db.wcaqfupjatnjwbgatzjv.supabase.co` fails to resolve locally, use the pooler
+URL from `supabase/.temp/pooler-url` or the Supabase dashboard instead.
 
 ## Import ESCO
 
