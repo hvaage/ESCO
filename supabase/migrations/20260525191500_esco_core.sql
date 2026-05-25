@@ -96,10 +96,10 @@ create table if not exists public.candidate_job_skill_gaps (
 );
 
 create index if not exists esco_entities_type_idx on public.esco_entities(entity_type);
-create index if not exists esco_entities_title_trgm_idx on public.esco_entities using gin (title gin_trgm_ops);
-create index if not exists esco_entities_title_no_trgm_idx on public.esco_entities using gin (title_no gin_trgm_ops);
-create index if not exists esco_entities_title_en_trgm_idx on public.esco_entities using gin (title_en gin_trgm_ops);
-create index if not exists esco_labels_label_trgm_idx on public.esco_labels using gin (label gin_trgm_ops);
+create index if not exists esco_entities_title_trgm_idx on public.esco_entities using gin (title extensions.gin_trgm_ops);
+create index if not exists esco_entities_title_no_trgm_idx on public.esco_entities using gin (title_no extensions.gin_trgm_ops);
+create index if not exists esco_entities_title_en_trgm_idx on public.esco_entities using gin (title_en extensions.gin_trgm_ops);
+create index if not exists esco_labels_label_trgm_idx on public.esco_labels using gin (label extensions.gin_trgm_ops);
 create index if not exists esco_occupation_skills_occ_idx on public.esco_occupation_skills(occupation_uri);
 create index if not exists esco_occupation_skills_skill_idx on public.esco_occupation_skills(skill_uri);
 create index if not exists job_skill_requirements_job_idx on public.job_skill_requirements(job_lead_id);
@@ -168,10 +168,10 @@ as $$
       e.title_no,
       e.title_en,
       greatest(
-        similarity(coalesce(e.title, ''), query),
-        similarity(coalesce(e.title_no, ''), query),
-        similarity(coalesce(e.title_en, ''), query),
-        coalesce(max(similarity(l.label, query)), 0)
+        extensions.similarity(coalesce(e.title, ''), query),
+        extensions.similarity(coalesce(e.title_no, ''), query),
+        extensions.similarity(coalesce(e.title_en, ''), query),
+        coalesce(max(extensions.similarity(l.label, query)), 0)
       ) as score
     from public.esco_entities e
     left join public.esco_labels l on l.entity_uri = e.uri
