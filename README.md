@@ -145,8 +145,7 @@ Import the local SSB JSON-stat2 exports after migrations:
 ```bash
 python scripts/apply_migrations.py
 python scripts/import_ssb_career_signals.py \
-  --source-dir /Users/henrikvaage/Downloads/norwegian-career-intelligence/data/raw/ssb \
-  --reset-ssb
+  --source-dir /Users/henrikvaage/Downloads/norwegian-career-intelligence/data/raw/ssb
 ```
 
 Validate without writing:
@@ -156,6 +155,11 @@ python scripts/import_ssb_career_signals.py \
   --source-dir /Users/henrikvaage/Downloads/norwegian-career-intelligence/data/raw/ssb \
   --dry-run
 ```
+
+SSB is also treated as a historical import. Re-running the importer with a new
+annual export updates existing table/dimension observations and adds new
+periods, without duplicating older observations. Use `--reset-ssb` only for a
+deliberate full rebuild from scratch.
 
 Import the NHO Kompetansebarometeret migration package:
 

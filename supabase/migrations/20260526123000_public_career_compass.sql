@@ -56,6 +56,22 @@ create index if not exists ssb_observations_metric_idx
 create index if not exists ssb_observations_dimensions_gin_idx
   on public.ssb_observations using gin (dimension_codes);
 
+delete from public.ssb_observations o
+using (
+  select
+    id,
+    row_number() over (
+      partition by table_id, dimension_key
+      order by imported_at desc, id desc
+    ) as duplicate_rank
+  from public.ssb_observations
+) duplicates
+where o.id = duplicates.id
+  and duplicates.duplicate_rank > 1;
+
+create unique index if not exists ssb_observations_table_dimension_unique_idx
+  on public.ssb_observations(table_id, dimension_key);
+
 create table if not exists public.industry_ssb_mappings (
   id bigserial primary key,
   industry_slug text not null references public.industries(slug) on delete cascade,
@@ -128,7 +144,7 @@ on conflict (source_key) do update set
   source_url = excluded.source_url,
   version = excluded.version,
   license = excluded.license,
-  metadata = excluded.metadata;
+  metadata = public.external_data_sources.metadata || excluded.metadata;
 
 insert into public.industry_ssb_mappings (
   industry_slug, ssb_table_id, ssb_dimension, ssb_code, ssb_label,
@@ -886,3 +902,52 @@ grant select on public.v_industry_national_signals to anon, authenticated;
 grant select on public.v_occupation_regional_signals to anon, authenticated;
 grant execute on function public.get_related_occupations(text, int) to anon, authenticated;
 grant execute on function public.get_public_career_compass(text, text, text) to anon, authenticated;
+
+with table_stats as (
+  select
+    m.table_id,
+    m.latest_period,
+    count(o.id)::integer as observation_count,
+    min(o.period_year) as first_year,
+    max(o.period_year) as latest_year
+  from public.ssb_table_metadata m
+  left join public.ssb_observations o on o.table_id = m.table_id
+  group by m.table_id, m.latest_period
+),
+ssb_import_state as (
+  select
+    coalesce(sum(observation_count), 0)::integer as observation_count,
+    max(latest_year) as latest_year,
+    coalesce(jsonb_agg(table_id order by table_id), '[]'::jsonb) as tables,
+    coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'table_id', table_id,
+          'latest_period', latest_period,
+          'observation_count', observation_count,
+          'first_year', first_year,
+          'latest_year', latest_year
+        )
+        order by table_id
+      ),
+      '[]'::jsonb
+    ) as table_stats
+  from table_stats
+)
+update public.external_data_sources
+set
+  version = coalesce(ssb_import_state.latest_year::text, version, '2026-05 local export'),
+  metadata = metadata || jsonb_build_object(
+    'status',
+      case
+        when ssb_import_state.observation_count > 0 then 'imported'
+        else coalesce(metadata->>'status', 'schema_ready_waiting_for_source_file')
+      end,
+    'tables', ssb_import_state.tables,
+    'observation_count', ssb_import_state.observation_count,
+    'table_stats', ssb_import_state.table_stats,
+    'historical_policy',
+      'SSB observations are upserted by table_id and dimension_key so repeated annual exports update existing periods and add new periods without duplicating older observations.'
+  )
+from ssb_import_state
+where source_key = 'ssb_labor_market_tables';

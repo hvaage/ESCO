@@ -235,7 +235,8 @@ def import_observations(conn: psycopg.Connection, rows: list[dict[str, Any]]) ->
           %(metric_label)s, %(value)s, %(unit)s, %(dimension_codes)s::jsonb,
           %(dimension_labels)s::jsonb, %(dimension_key)s, %(raw_dimension)s::jsonb, now()
         )
-        on conflict (table_id, source_file, dimension_key) do update set
+        on conflict (table_id, dimension_key) do update set
+          source_file = excluded.source_file,
           period = excluded.period,
           metric_code = excluded.metric_code,
           metric_label = excluded.metric_label,
@@ -249,6 +250,62 @@ def import_observations(conn: psycopg.Connection, rows: list[dict[str, Any]]) ->
     with conn.cursor() as cur:
         for batch in chunks(rows):
             cur.executemany(statement, batch)
+    conn.commit()
+
+
+def update_import_metadata(conn: psycopg.Connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            select
+              m.table_id,
+              m.latest_period,
+              count(o.id)::integer as observation_count,
+              min(o.period_year) as first_year,
+              max(o.period_year) as latest_year
+            from public.ssb_table_metadata m
+            left join public.ssb_observations o on o.table_id = m.table_id
+            group by m.table_id, m.latest_period
+            order by m.table_id
+            """
+        )
+        table_stats = [
+            {
+                "table_id": table_id,
+                "latest_period": latest_period,
+                "observation_count": observation_count,
+                "first_year": first_year,
+                "latest_year": latest_year,
+            }
+            for table_id, latest_period, observation_count, first_year, latest_year in cur.fetchall()
+        ]
+        latest_years = [row["latest_year"] for row in table_stats if row["latest_year"] is not None]
+        version = str(max(latest_years)) if latest_years else None
+        cur.execute("select count(*)::integer from public.ssb_observations")
+        observation_count = cur.fetchone()[0]
+        cur.execute(
+            """
+            update public.external_data_sources
+            set imported_at = now(),
+                version = coalesce(%s::text, version),
+                metadata = metadata
+                  || jsonb_build_object(
+                    'status', 'imported',
+                    'tables', %s::jsonb,
+                    'observation_count', %s::integer,
+                    'table_stats', %s::jsonb,
+                    'historical_policy',
+                      'SSB observations are upserted by table_id and dimension_key so repeated annual exports update existing periods and add new periods without duplicating older observations.'
+                  )
+            where source_key = 'ssb_labor_market_tables'
+            """,
+            (
+                version,
+                json.dumps([row["table_id"] for row in table_stats]),
+                observation_count,
+                json.dumps(table_stats, ensure_ascii=False),
+            ),
+        )
     conn.commit()
 
 
@@ -291,22 +348,7 @@ def main() -> int:
             reset_ssb(conn)
         import_metadata(conn, list(all_metadata.values()))
         import_observations(conn, all_rows)
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                update public.external_data_sources
-                set imported_at = now(),
-                    metadata = jsonb_set(
-                      metadata,
-                      '{observation_count}',
-                      to_jsonb(%s::integer),
-                      true
-                    )
-                where source_key = 'ssb_labor_market_tables'
-                """,
-                (len(all_rows),),
-            )
-        conn.commit()
+        update_import_metadata(conn)
 
     print("SSB career signals imported.")
     return 0
