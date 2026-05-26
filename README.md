@@ -162,8 +162,7 @@ Import the NHO Kompetansebarometeret migration package:
 ```bash
 python scripts/apply_migrations.py
 python scripts/import_nho_kompetansebarometer.py \
-  --zip-path /private/tmp/nho-kompetansebarometer-2025-migreringspakke-20260526-141932.zip \
-  --reset-nho
+  --zip-path /private/tmp/nho-kompetansebarometer-2025-migreringspakke-20260526-141932.zip
 ```
 
 Validate without writing:
@@ -173,6 +172,28 @@ python scripts/import_nho_kompetansebarometer.py \
   --zip-path /private/tmp/nho-kompetansebarometer-2025-migreringspakke-20260526-141932.zip \
   --dry-run
 ```
+
+NHO is an annual historical import. Keep prior years unless you deliberately
+need a full rebuild. When the 2026 package arrives, import it without reset:
+
+```bash
+python scripts/apply_migrations.py
+python scripts/import_nho_kompetansebarometer.py \
+  --zip-path /path/to/nho-kompetansebarometer-2026-migreringspakke.zip
+```
+
+If an already imported year is corrected, replace only that year:
+
+```bash
+python scripts/import_nho_kompetansebarometer.py \
+  --zip-path /path/to/nho-kompetansebarometer-2026-migreringspakke.zip \
+  --replace-year 2026
+```
+
+Use `--reset-nho` only for a deliberate full NHO rebuild. The public compass
+uses the latest imported NHO year by default, while
+`v_nho_compass_signal_year_trends` retains all imported years for development
+over time.
 
 NHO data are imported in two layers:
 

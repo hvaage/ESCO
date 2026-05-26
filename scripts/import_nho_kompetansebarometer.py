@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import NHO Kompetansebarometer 2025 migration package into Supabase."""
+"""Import an NHO Kompetansebarometer migration package into Supabase."""
 
 from __future__ import annotations
 
@@ -18,18 +18,29 @@ from dotenv import load_dotenv
 
 
 DEFAULT_ZIP_PATH = Path("/private/tmp/nho-kompetansebarometer-2025-migreringspakke-20260526-141932.zip")
-PACKAGE_PREFIX = "nho-kompetansebarometer-2025-migreringspakke-20260526-141932"
-SOURCES_CSV = f"{PACKAGE_PREFIX}/data/normalized/all_sources_manifest.csv"
-OBSERVATIONS_CSV = f"{PACKAGE_PREFIX}/data/normalized/all_observations_long.csv"
+SOURCES_CSV_SUFFIX = "/data/normalized/all_sources_manifest.csv"
+OBSERVATIONS_CSV_SUFFIX = "/data/normalized/all_observations_long.csv"
 CHUNK_SIZE = 5000
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--zip-path", type=Path, default=DEFAULT_ZIP_PATH)
-    parser.add_argument("--reset-nho", action="store_true")
+    parser.add_argument(
+        "--replace-year",
+        type=int,
+        help="Delete and re-import one report year while preserving other years.",
+    )
+    parser.add_argument(
+        "--reset-nho",
+        action="store_true",
+        help="Delete all imported NHO years before import. Use only for full rebuilds.",
+    )
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.reset_nho and args.replace_year:
+        parser.error("--reset-nho and --replace-year cannot be used together.")
+    return args
 
 
 def chunks(rows: list[dict[str, Any]], size: int = CHUNK_SIZE) -> Iterable[list[dict[str, Any]]]:
@@ -75,6 +86,13 @@ def observation_key(row: dict[str, str]) -> str:
     ]
     payload = json.dumps({field: row.get(field, "") for field in stable_fields}, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def find_package_file(zip_file: zipfile.ZipFile, suffix: str) -> str:
+    matches = [name for name in zip_file.namelist() if name.endswith(suffix)]
+    if len(matches) != 1:
+        raise FileNotFoundError(f"Expected exactly one *{suffix}, found {len(matches)}")
+    return matches[0]
 
 
 def open_csv(zip_file: zipfile.ZipFile, name: str) -> csv.DictReader:
@@ -143,6 +161,13 @@ def reset_nho(conn: Any) -> None:
             restart identity cascade
             """
         )
+    conn.commit()
+
+
+def replace_year(conn: Any, year: int) -> None:
+    with conn.cursor() as cur:
+        cur.execute("delete from public.nho_kb_observations where year = %s", (year,))
+        cur.execute("delete from public.nho_kb_sources where year = %s", (year,))
     conn.commit()
 
 
@@ -232,6 +257,54 @@ def import_observations(conn: Any, rows: list[dict[str, Any]]) -> None:
     conn.commit()
 
 
+def update_import_metadata(conn: Any, source_rows: list[dict[str, Any]], observation_count: int, package_name: str) -> None:
+    imported_years = sorted({row["year"] for row in source_rows if row.get("year") is not None})
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            select coalesce(array_agg(year order by year), '{}'::integer[])
+            from (
+              select distinct year
+              from public.nho_kb_sources
+            ) years
+            """
+        )
+        available_years = list(cur.fetchone()[0] or [])
+        cur.execute("select max(year) from public.nho_kb_sources")
+        latest_year = cur.fetchone()[0]
+        cur.execute(
+            """
+            update public.external_data_sources
+            set imported_at = now(),
+                version = coalesce(%s::text, version),
+                metadata = metadata
+                  || jsonb_build_object(
+                    'status', 'imported',
+                    'latest_year', %s::integer,
+                    'available_years', %s::jsonb,
+                    'last_import', jsonb_build_object(
+                      'package', %s::text,
+                      'years', %s::jsonb,
+                      'source_count', %s::integer,
+                      'observation_count', %s::integer,
+                      'imported_at', now()
+                    )
+                  )
+            where source_key = 'nho_kompetansebarometeret'
+            """,
+            (
+                str(latest_year) if latest_year is not None else None,
+                latest_year,
+                json.dumps(available_years),
+                package_name,
+                json.dumps(imported_years),
+                len(source_rows),
+                observation_count,
+            ),
+        )
+    conn.commit()
+
+
 def main() -> int:
     args = parse_args()
     zip_path = args.zip_path.expanduser()
@@ -240,15 +313,25 @@ def main() -> int:
         return 2
 
     with zipfile.ZipFile(zip_path) as zip_file:
-        source_rows = [source_row(row) for row in open_csv(zip_file, SOURCES_CSV)]
+        sources_csv = find_package_file(zip_file, SOURCES_CSV_SUFFIX)
+        observations_csv = find_package_file(zip_file, OBSERVATIONS_CSV_SUFFIX)
+        source_rows = [source_row(row) for row in open_csv(zip_file, sources_csv)]
         observation_rows: list[dict[str, Any]] = []
-        for row in open_csv(zip_file, OBSERVATIONS_CSV):
+        for row in open_csv(zip_file, observations_csv):
             observation_rows.append(observation_row(row))
 
+    imported_years = sorted({row["year"] for row in source_rows if row.get("year") is not None})
     print(f"NHO sources: {len(source_rows)}")
     print(f"NHO observations: {len(observation_rows)}")
+    print(f"NHO years in package: {', '.join(str(year) for year in imported_years)}")
     if not source_rows or not observation_rows:
         print("Package did not contain expected normalized CSV rows.", file=sys.stderr)
+        return 2
+    if args.replace_year and imported_years != [args.replace_year]:
+        print(
+            f"--replace-year {args.replace_year} does not match package years {imported_years}",
+            file=sys.stderr,
+        )
         return 2
 
     if args.dry_run:
@@ -265,26 +348,11 @@ def main() -> int:
     with psycopg.connect(database_url) as conn:
         if args.reset_nho:
             reset_nho(conn)
+        if args.replace_year:
+            replace_year(conn, args.replace_year)
         import_sources(conn, source_rows)
         import_observations(conn, observation_rows)
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                update public.external_data_sources
-                set imported_at = now(),
-                    version = '2025',
-                    metadata = metadata
-                      || jsonb_build_object(
-                        'status', 'imported',
-                        'source_count', %s::integer,
-                        'observation_count', %s::integer,
-                        'source_package', %s::text
-                      )
-                where source_key = 'nho_kompetansebarometeret'
-                """,
-                (len(source_rows), len(observation_rows), zip_path.name),
-            )
-        conn.commit()
+        update_import_metadata(conn, source_rows, len(observation_rows), zip_path.name)
 
     print("NHO Kompetansebarometer imported.")
     return 0

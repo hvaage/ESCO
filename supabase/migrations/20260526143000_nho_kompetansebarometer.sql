@@ -403,6 +403,7 @@ select
   s.*,
   row_number() over (
     partition by
+      s.year,
       s.signal_type,
       coalesce(s.industry_slug, 'national'),
       coalesce(s.region_code, 'national')
@@ -414,6 +415,77 @@ select
 from public.v_nho_compass_signals s
 where s.signal_value is not null
   and (s.mapping_scope is not null or s.group_type = 'Hovedrapport');
+
+create or replace view public.v_nho_compass_signal_year_trends as
+with yearly as (
+  select
+    signal_type,
+    signal_label,
+    group_type,
+    subgroup,
+    classification,
+    native_dimension,
+    native_dimension_value,
+    industry_slug,
+    industry_name_no,
+    region_code,
+    region_label,
+    mapping_scope,
+    year,
+    round(avg(signal_value)::numeric, 2) as signal_value,
+    round(avg(high_intensity_value)::numeric, 2) as high_intensity_value,
+    sum(sample_base) as sample_base,
+    max(confidence) as confidence,
+    jsonb_agg(metadata) as source_metadata
+  from public.v_nho_compass_signals
+  where signal_value is not null
+    and (mapping_scope is not null or group_type = 'Hovedrapport')
+  group by
+    signal_type,
+    signal_label,
+    group_type,
+    subgroup,
+    classification,
+    native_dimension,
+    native_dimension_value,
+    industry_slug,
+    industry_name_no,
+    region_code,
+    region_label,
+    mapping_scope,
+    year
+),
+with_previous as (
+  select
+    y.*,
+    lag(y.year) over trend_window as previous_year,
+    lag(y.signal_value) over trend_window as previous_signal_value
+  from yearly y
+  window trend_window as (
+    partition by
+      signal_type,
+      signal_label,
+      group_type,
+      subgroup,
+      classification,
+      native_dimension,
+      coalesce(native_dimension_value, ''),
+      coalesce(industry_slug, ''),
+      coalesce(region_code, '')
+    order by year
+  )
+)
+select
+  *,
+  round((signal_value - previous_signal_value)::numeric, 2) as signal_change,
+  round(
+    case
+      when previous_signal_value is null or previous_signal_value = 0 then null
+      else ((signal_value - previous_signal_value) / previous_signal_value) * 100
+    end::numeric,
+    2
+  ) as signal_change_percent
+from with_previous;
 
 create or replace function public.get_public_career_compass(
   search_text text,
@@ -503,6 +575,18 @@ begin
       where ms.occupation_uri = occupation.uri
       limit 1
     ), '{}'::jsonb),
+    'nho_metadata', jsonb_build_object(
+      'latest_year', (select max(year) from public.nho_kb_sources),
+      'available_years', coalesce((
+        select jsonb_agg(year order by year)
+        from (
+          select distinct year
+          from public.nho_kb_sources
+          order by year
+        ) years
+      ), '[]'::jsonb),
+      'historical_policy', 'NHO years are retained. The compass shows the latest imported year by default; use trend views for year-over-year development.'
+    ),
     'industries', coalesce((
       select jsonb_agg(
         jsonb_build_object(
@@ -678,6 +762,10 @@ begin
             where oi.occupation_uri = occupation.uri
           )
         )
+        and ranked.year = (
+          select max(year)
+          from public.nho_kb_sources
+        )
         and (
           filter_region_code is null
           or length(trim(filter_region_code)) = 0
@@ -724,21 +812,43 @@ grant select on public.v_nho_education_level_signals to anon, authenticated;
 grant select on public.v_nho_skill_weight_signals to anon, authenticated;
 grant select on public.v_nho_compass_signals to anon, authenticated;
 grant select on public.v_nho_compass_signals_ranked to anon, authenticated;
+grant select on public.v_nho_compass_signal_year_trends to anon, authenticated;
 grant execute on function public.get_public_career_compass(text, text, text) to anon, authenticated;
 
+with nho_import_state as (
+  select
+    (select count(*) from public.nho_kb_sources) as source_count,
+    (select max(year) from public.nho_kb_sources) as latest_year,
+    (
+      select coalesce(jsonb_agg(year order by year), '[]'::jsonb)
+      from (
+        select distinct year
+        from public.nho_kb_sources
+      ) years
+    ) as available_years
+)
 update public.external_data_sources
 set
-  version = '2025',
-  metadata = jsonb_build_object(
-    'status', 'schema_ready',
+  version = coalesce(nho_import_state.latest_year::text, version, 'annual'),
+  metadata = metadata || jsonb_build_object(
+    'status',
+      case
+        when nho_import_state.source_count > 0 then 'imported'
+        else coalesce(metadata->>'status', 'schema_ready_waiting_for_source_file')
+      end,
+    'latest_year', nho_import_state.latest_year,
+    'available_years', nho_import_state.available_years,
     'raw_tables', jsonb_build_array('nho_kb_sources', 'nho_kb_observations'),
     'curated_views', jsonb_build_array(
       'v_nho_unmet_need_signals',
       'v_nho_competence_field_signals',
       'v_nho_education_level_signals',
       'v_nho_skill_weight_signals',
-      'v_nho_compass_signals_ranked'
+      'v_nho_compass_signals_ranked',
+      'v_nho_compass_signal_year_trends'
     ),
+    'historical_policy', 'Import new annual packages without reset. Use replace-year for corrected annual reimports so older years remain available.',
     'interpretation_warning', 'NHO data are aggregated figure data. Do not freely cross dimensions unless the published source file contains that cross-tab.'
   )
+from nho_import_state
 where source_key = 'nho_kompetansebarometeret';
