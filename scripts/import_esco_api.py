@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 
 ESCO_API_BASE = "https://ec.europa.eu/esco/api"
+DEFAULT_ESCO_VERSION = "v1.2.1"
 
 
 @dataclass
@@ -51,32 +52,42 @@ def fetch_json(path_or_url: str, params: dict[str, Any] | None = None, sleep: fl
     return data
 
 
-def paged_search(entity_type: str, language: str, limit: int, sleep: float) -> Iterable[dict[str, Any]]:
-    next_url: str | None = None
+def paged_search(
+    entity_type: str,
+    language: str,
+    selected_version: str,
+    limit: int,
+    sleep: float,
+) -> Iterable[dict[str, Any]]:
+    offset = 0
+    total: int | None = None
+    returned = 0
     while True:
-        if next_url:
-            page = fetch_json(next_url, sleep=sleep)
-        else:
-            page = fetch_json(
-                "/search",
-                {
-                    "type": entity_type,
-                    "language": language,
-                    "limit": limit,
-                    "offset": 0,
-                    "full": "false",
-                    "viewObsolete": "false",
-                },
-                sleep=sleep,
-            )
+        page = fetch_json(
+            "/search",
+            {
+                "type": entity_type,
+                "language": language,
+                "selectedVersion": selected_version,
+                "limit": limit,
+                "offset": offset,
+                "full": "false",
+                "viewObsolete": "false",
+            },
+            sleep=sleep,
+        )
+        total = int(page.get("total") or 0)
+        batch = page.get("_embedded", {}).get("results", [])
+        if not batch:
+            break
 
-        for item in page.get("_embedded", {}).get("results", []):
+        for item in batch:
             yield item
 
-        next_link = page.get("_links", {}).get("next", {}).get("href")
-        if not next_link:
+        returned += len(batch)
+        if returned >= total:
             break
-        next_url = next_link
+        offset += 1
 
 
 def literal(description: Any, language: str) -> str | None:
@@ -229,6 +240,7 @@ def import_search_entities(
     conn: psycopg.Connection,
     entity_type: str,
     language: str,
+    selected_version: str,
     page_limit: int,
     max_items: int | None,
     sleep: float,
@@ -237,7 +249,7 @@ def import_search_entities(
     entity_count = 0
     label_count = 0
     with conn.cursor() as cur:
-        for item in paged_search(entity_type, language, page_limit, sleep):
+        for item in paged_search(entity_type, language, selected_version, page_limit, sleep):
             upsert_entity(cur, item, entity_type, language)
             label_count += upsert_labels(cur, item)
             uris.append(item["uri"])
@@ -255,6 +267,7 @@ def import_occupation_relations(
     conn: psycopg.Connection,
     occupation_uris: list[str],
     language: str,
+    selected_version: str,
     max_items: int | None,
     sleep: float,
 ) -> tuple[int, int]:
@@ -264,7 +277,7 @@ def import_occupation_relations(
         for uri in occupation_uris[: max_items or None]:
             resource = fetch_json(
                 "/resource/occupation",
-                {"uri": uri, "language": language},
+                {"uri": uri, "language": language, "selectedVersion": selected_version},
                 sleep=sleep,
             )
             upsert_entity(cur, resource, "occupation", language)
@@ -287,6 +300,7 @@ def import_occupation_relations(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--language", default=os.getenv("ESCO_LANGUAGE", "no"))
+    parser.add_argument("--selected-version", default=os.getenv("ESCO_VERSION", DEFAULT_ESCO_VERSION))
     parser.add_argument("--page-limit", type=int, default=500)
     parser.add_argument("--sleep", type=float, default=0.05)
     parser.add_argument("--limit-occupations", type=int)
@@ -304,15 +318,32 @@ def main() -> int:
     try:
         with psycopg.connect(database_url) as conn:
             occupation_uris, stats.occupations, occupation_labels = import_search_entities(
-                conn, "occupation", args.language, args.page_limit, args.limit_occupations, args.sleep
+                conn,
+                "occupation",
+                args.language,
+                args.selected_version,
+                args.page_limit,
+                args.limit_occupations,
+                args.sleep,
             )
             skill_uris, stats.skills, skill_labels = import_search_entities(
-                conn, "skill", args.language, args.page_limit, args.limit_skills, args.sleep
+                conn,
+                "skill",
+                args.language,
+                args.selected_version,
+                args.page_limit,
+                args.limit_skills,
+                args.sleep,
             )
             stats.labels = occupation_labels + skill_labels
             if not args.skip_relations:
                 stats.occupation_resources, stats.relations = import_occupation_relations(
-                    conn, occupation_uris, args.language, args.limit_occupations, args.sleep
+                    conn,
+                    occupation_uris,
+                    args.language,
+                    args.selected_version,
+                    args.limit_occupations,
+                    args.sleep,
                 )
     except psycopg.OperationalError as exc:
         print(f"Could not connect to Postgres: {exc}", file=sys.stderr)
