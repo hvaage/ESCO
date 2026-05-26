@@ -123,22 +123,28 @@ STYRK/EURES crosswalk; use the CSV importer for the Norwegian full version.
 The public no-login teaser is exposed as a Supabase RPC:
 
 ```ts
-supabase.rpc("get_public_career_compass", {
+supabase.rpc("get_career_direction_explorer", {
   search_text: "sykepleier",
   filter_region_code: null,
   filter_industry_slug: null,
 })
 ```
 
-It returns one JSON payload with:
+It returns a frontend-ready JSON payload for the "Utforsk en karriereretning"
+experience:
 
-- matched ESCO/STYRK occupation
-- SSB market signal from occupation-group employment trends
-- essential and optional ESCO skills
-- relevant industries and national industry signals
-- regional signals based on SSB field-of-study/region data
-- NHO competence signals when imported
-- related occupations based on ESCO skill overlap
+- `summary`: title, description, combined demand score and key insights
+- `demand`: SSB/NHO demand components, market signal and employer-demand signals
+- `competencies`: must-have and nice-to-have ESCO skills, plus learn-next suggestions
+- `industries`: matched industries and national SSB industry signals
+- `geography`: regional SSB signals; accepts SSB municipality codes like `K-0301`
+  or two-digit county prefixes like `03`
+- `nearby_occupations`: transferable career paths based on ESCO skill overlap
+- `visualization`: chart-ready demand bars, skill counts, region ranking and related network
+- `data_sources` and `confidence_notes`: source provenance and interpretation caveats
+
+The lower-level `get_public_career_compass` RPC is still available as a raw
+data payload for debugging and future backend composition.
 
 Import the local SSB JSON-stat2 exports after migrations:
 
