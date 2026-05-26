@@ -20,6 +20,13 @@ The first migration creates:
 - `styrk08`: Norwegian STYRK-08 hierarchy
 - `esco_styrk_mappings`: EURES/derived mapping from ESCO occupations to STYRK-08
 - `esco_occupation_aliases`: weighted Norwegian occupation aliases from ESCO, EURES and STYRK
+- `industries`: curated Norwegian industry filters
+- `occupation_industries`: seeded occupation-to-industry mappings
+- `ssb_table_metadata` and `ssb_observations`: normalized SSB career-signal observations
+- `industry_ssb_mappings`: first-pass mapping from local industries to SSB NACE/fagfelt codes
+- `nho_kb_sources` and `nho_kb_observations`: raw NHO Kompetansebarometeret figure data
+- `nho_kb_subgroup_mappings`: conservative mapping from NHO groups/counties to local industries and regions
+- `nho_competence_signals`: optional manual/import surface for additional NHO signals
 - `job_leads`: job ads or user-saved job leads
 - `job_skill_requirements`: skills extracted from job leads
 - `candidate_skill_claims`: skills extracted from a user's CV/profile
@@ -94,6 +101,7 @@ This imports:
 - EURES Norway occupation mapping, documented as ESCO v1.0.8 source data
 - low-confidence ISCO/STYRK fallback mappings for current ESCO occupations not covered by EURES
 - weighted Norwegian aliases for occupation matching
+- first-pass industry filters derived from STYRK prefixes and occupation title rules
 
 The legacy API importer can still be used for small smoke tests:
 
@@ -109,6 +117,95 @@ python scripts/import_esco_api.py
 
 The API importer pins `selectedVersion=v1.2.1` by default. It does not import the
 STYRK/EURES crosswalk; use the CSV importer for the Norwegian full version.
+
+## Public Career Compass
+
+The public no-login teaser is exposed as a Supabase RPC:
+
+```ts
+supabase.rpc("get_public_career_compass", {
+  search_text: "sykepleier",
+  filter_region_code: null,
+  filter_industry_slug: null,
+})
+```
+
+It returns one JSON payload with:
+
+- matched ESCO/STYRK occupation
+- SSB market signal from occupation-group employment trends
+- essential and optional ESCO skills
+- relevant industries and national industry signals
+- regional signals based on SSB field-of-study/region data
+- NHO competence signals when imported
+- related occupations based on ESCO skill overlap
+
+Import the local SSB JSON-stat2 exports after migrations:
+
+```bash
+python scripts/apply_migrations.py
+python scripts/import_ssb_career_signals.py \
+  --source-dir /Users/henrikvaage/Downloads/norwegian-career-intelligence/data/raw/ssb \
+  --reset-ssb
+```
+
+Validate without writing:
+
+```bash
+python scripts/import_ssb_career_signals.py \
+  --source-dir /Users/henrikvaage/Downloads/norwegian-career-intelligence/data/raw/ssb \
+  --dry-run
+```
+
+Import the NHO Kompetansebarometeret migration package:
+
+```bash
+python scripts/apply_migrations.py
+python scripts/import_nho_kompetansebarometer.py \
+  --zip-path /private/tmp/nho-kompetansebarometer-2025-migreringspakke-20260526-141932.zip \
+  --reset-nho
+```
+
+Validate without writing:
+
+```bash
+python scripts/import_nho_kompetansebarometer.py \
+  --zip-path /private/tmp/nho-kompetansebarometer-2025-migreringspakke-20260526-141932.zip \
+  --dry-run
+```
+
+NHO data are imported in two layers:
+
+- raw `nho_kb_sources` / `nho_kb_observations` for traceability
+- curated public views such as `v_nho_unmet_need_signals`,
+  `v_nho_competence_field_signals`, `v_nho_education_level_signals` and
+  `v_nho_skill_weight_signals`
+
+Do not freely cross NHO dimensions. The public XLSX files are aggregated figure
+data, not respondent-level data. Product views only combine dimensions that are
+present in the same published source row.
+
+## Industry Filters
+
+Industries are stored as a local filter layer, not as official ESCO data.
+
+Frontend clients can read:
+
+- `industries`
+- `v_occupation_industries`
+
+For occupation search with industry filtering, use:
+
+```ts
+supabase.rpc("search_esco_occupations", {
+  search_text: "sykepleier",
+  filter_industry_slugs: ["helse_omsorg"],
+  result_limit: 10,
+})
+```
+
+Use an empty array or `null` for `filter_industry_slugs` to search across all
+industries.
 
 ## Matching Flow
 
