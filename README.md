@@ -187,7 +187,7 @@ vacancy and salary signals for an occupation:
 
 ```ts
 supabase.rpc("get_public_market_capacity", {
-  search_text: "sykepleier",
+  search_text: occupationUri ?? "sykepleier",
   result_limit: 10,
 })
 ```
@@ -203,6 +203,11 @@ The same data is exposed as `v_styrk_market_capacity` and
 `v_esco_market_capacity`. NAV sometimes publishes occupation rows at a broader
 group level than STYRK-4; where this happens, the views prefer exact STYRK-4
 matches and otherwise fall back to conservative STYRK-prefix matches.
+
+When the UI has an ESCO occupation URI, pass the URI as `search_text`. The RPC
+uses an exact fast path for ESCO occupation URIs and returns period fields
+(`shortage_year`, `unemployment_period`, `vacancies_period`, `salary_year`) on
+each item.
 
 Use `get_public_market_capacity_overview` for the front-page "Arbeidsmarkedet
 akkurat nå" section. It returns one ready-sorted list per segment, backed by a
