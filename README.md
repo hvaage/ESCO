@@ -324,6 +324,32 @@ The salary importer currently targets SSB table 11418. It imports the latest
 year by default, with median, average and quartile monthly salary for STYRK-4
 occupations across all, private, state and municipal sectors.
 
+It also supports SSB salary profile tables `11420` and `11421`:
+
+```bash
+python scripts/import_ssb_salary_tables.py --table-id 11420
+python scripts/import_ssb_salary_tables.py --table-id 11421
+```
+
+Use `get_public_salary_profile` for visual salary profiles by industry:
+
+```ts
+supabase.rpc("get_public_salary_profile", {
+  filter_industry_slug: "bygg_anlegg",
+  filter_nace_code: null,
+  education_level: null, // Ialt | 1-2 | 3-5 | 6 | 7-8
+  age_group: null,       // 999 | 00-24 | 25-29 | ... | 60-
+  gender: "0",          // 0 both | 2 women | 1 men
+  sector: "ALLE",       // ALLE | A+B+D+E | 6500 | 6100
+  working_time: "0",    // 0 all | 5 full-time | 6 part-time
+})
+```
+
+The RPC returns `education_series` from SSB `11420`, `age_series` from SSB
+`11421`, KPI values, filter metadata, method notes and source metadata. SSB does
+not publish age and education combined in these tables, so show the two series
+as separate official comparisons.
+
 Import NAV market-capacity signals from the latest public Excel attachments on
 nav.no:
 

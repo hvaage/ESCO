@@ -20,6 +20,12 @@ from dotenv import load_dotenv
 SSB_API_BASE = "https://data.ssb.no/api/v0/no/table"
 DEFAULT_TABLE = "11418"
 CHUNK_SIZE = 2000
+STATISTIC_VALUES = ["02", "01", "051", "061", "10"]
+SECTOR_VALUES = ["ALLE", "A+B+D+E", "6500", "6100"]
+GENDER_VALUES = ["0", "2", "1"]
+WORKING_TIME_11418_VALUES = ["0"]
+WORKING_TIME_VALUES = ["0", "5", "6"]
+SALARY_CONTENT_VALUES = ["Manedslonn"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,16 +101,33 @@ def four_digit_occupations(metadata: dict[str, Any]) -> list[str]:
     ]
 
 
+def all_values(metadata: dict[str, Any], code: str) -> list[str]:
+    return variable_values(metadata, code)
+
+
+def selected_values(metadata: dict[str, Any], code: str, preferred: list[str]) -> list[str]:
+    available = set(variable_values(metadata, code))
+    return [value for value in preferred if value in available]
+
+
+def selected_nace_values(metadata: dict[str, Any]) -> list[str]:
+    return [
+        value
+        for value in all_values(metadata, "NACE2007")
+        if value not in {"00", "Ialt"}
+    ]
+
+
 def build_query(metadata: dict[str, Any], years: list[str]) -> dict[str, Any]:
     table_id = metadata.get("id")
-    if table_id != "11418":
-        raise ValueError("This importer currently supports SSB table 11418.")
+    if table_id not in {"11418", "11420", "11421"}:
+        raise ValueError("This importer currently supports SSB tables 11418, 11420 and 11421.")
 
-    return {
-        "query": [
+    if table_id == "11418":
+        query = [
             {
                 "code": "MaaleMetode",
-                "selection": {"filter": "item", "values": ["02", "01", "051", "061"]},
+                "selection": {"filter": "item", "values": selected_values(metadata, "MaaleMetode", STATISTIC_VALUES[:4])},
             },
             {
                 "code": "Yrke",
@@ -112,13 +135,74 @@ def build_query(metadata: dict[str, Any], years: list[str]) -> dict[str, Any]:
             },
             {
                 "code": "Sektor",
-                "selection": {"filter": "item", "values": ["ALLE", "A+B+D+E", "6500", "6100"]},
+                "selection": {"filter": "item", "values": selected_values(metadata, "Sektor", SECTOR_VALUES)},
             },
             {"code": "Kjonn", "selection": {"filter": "item", "values": ["0"]}},
-            {"code": "AvtaltVanlig", "selection": {"filter": "item", "values": ["0"]}},
-            {"code": "ContentsCode", "selection": {"filter": "item", "values": ["Manedslonn"]}},
+            {"code": "AvtaltVanlig", "selection": {"filter": "item", "values": WORKING_TIME_11418_VALUES}},
+            {"code": "ContentsCode", "selection": {"filter": "item", "values": SALARY_CONTENT_VALUES}},
             {"code": "Tid", "selection": {"filter": "item", "values": years}},
-        ],
+        ]
+    elif table_id == "11420":
+        query = [
+            {
+                "code": "MaaleMetode",
+                "selection": {"filter": "item", "values": selected_values(metadata, "MaaleMetode", STATISTIC_VALUES)},
+            },
+            {
+                "code": "Sektor",
+                "selection": {"filter": "item", "values": selected_values(metadata, "Sektor", SECTOR_VALUES)},
+            },
+            {
+                "code": "UtdanNivaa",
+                "selection": {"filter": "item", "values": all_values(metadata, "UtdanNivaa")},
+            },
+            {
+                "code": "NACE2007",
+                "selection": {"filter": "item", "values": selected_nace_values(metadata)},
+            },
+            {
+                "code": "Kjonn",
+                "selection": {"filter": "item", "values": selected_values(metadata, "Kjonn", GENDER_VALUES)},
+            },
+            {
+                "code": "ArbeidsTid",
+                "selection": {"filter": "item", "values": selected_values(metadata, "ArbeidsTid", WORKING_TIME_VALUES)},
+            },
+            {"code": "ContentsCode", "selection": {"filter": "item", "values": SALARY_CONTENT_VALUES}},
+            {"code": "Tid", "selection": {"filter": "item", "values": years}},
+        ]
+    else:
+        query = [
+            {
+                "code": "MaaleMetode",
+                "selection": {"filter": "item", "values": selected_values(metadata, "MaaleMetode", STATISTIC_VALUES)},
+            },
+            {
+                "code": "Sektor",
+                "selection": {"filter": "item", "values": selected_values(metadata, "Sektor", SECTOR_VALUES)},
+            },
+            {
+                "code": "NACE2007",
+                "selection": {"filter": "item", "values": selected_nace_values(metadata)},
+            },
+            {
+                "code": "Alder",
+                "selection": {"filter": "item", "values": all_values(metadata, "Alder")},
+            },
+            {
+                "code": "Kjonn",
+                "selection": {"filter": "item", "values": selected_values(metadata, "Kjonn", GENDER_VALUES)},
+            },
+            {
+                "code": "ArbeidsTid",
+                "selection": {"filter": "item", "values": selected_values(metadata, "ArbeidsTid", WORKING_TIME_VALUES)},
+            },
+            {"code": "ContentsCode", "selection": {"filter": "item", "values": SALARY_CONTENT_VALUES}},
+            {"code": "Tid", "selection": {"filter": "item", "values": years}},
+        ]
+
+    return {
+        "query": query,
         "response": {"format": "JSON-stat2"},
     }
 
