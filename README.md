@@ -27,6 +27,8 @@ The first migration creates:
 - `nho_kb_sources` and `nho_kb_observations`: raw NHO Kompetansebarometeret figure data
 - `nho_kb_subgroup_mappings`: conservative mapping from NHO groups/counties to local industries and regions
 - `nho_competence_signals`: optional manual/import surface for additional NHO signals
+- `nav_source_files`, `nav_monthly_occupation_stats` and `nav_labour_shortage_survey`: NAV unemployment, vacancy and labour-shortage signals
+- SSB salary observations from table 11418 in `ssb_observations`
 - `job_leads`: job ads or user-saved job leads
 - `job_skill_requirements`: skills extracted from job leads
 - `candidate_skill_claims`: skills extracted from a user's CV/profile
@@ -180,6 +182,28 @@ the occupations in the selected scope, with example occupations for each skill.
 Use NHO fields for employer demand signals, and use this RPC for actual
 occupation-skill requirements.
 
+Use `get_public_market_capacity` when the UI needs shortage, unemployment,
+vacancy and salary signals for an occupation:
+
+```ts
+supabase.rpc("get_public_market_capacity", {
+  search_text: "sykepleier",
+  result_limit: 10,
+})
+```
+
+It combines:
+
+- NAV Bedriftsundersøkelsen: estimated shortage by occupation
+- NAV Helt ledige: monthly registered unemployed by occupation
+- NAV Tilgang ledige stillinger: monthly vacancy flow by occupation
+- SSB 11418: monthly salary by STYRK occupation and sector
+
+The same data is exposed as `v_styrk_market_capacity` and
+`v_esco_market_capacity`. NAV sometimes publishes occupation rows at a broader
+group level than STYRK-4; where this happens, the views prefer exact STYRK-4
+matches and otherwise fall back to conservative STYRK-prefix matches.
+
 Use `get_career_direction_explorer` after the user searches for or selects a
 specific occupation/competence:
 
@@ -254,7 +278,43 @@ python scripts/import_nho_kompetansebarometer.py \
   --zip-path /path/to/nho-kompetansebarometer-2026-migreringspakke.zip
 ```
 
-If an already imported year is corrected, replace only that year:
+Import SSB salary data from the live SSB API:
+
+```bash
+python scripts/apply_migrations.py
+python scripts/import_ssb_salary_tables.py
+```
+
+Validate without writing:
+
+```bash
+python scripts/import_ssb_salary_tables.py --dry-run
+```
+
+The salary importer currently targets SSB table 11418. It imports the latest
+year by default, with median, average and quartile monthly salary for STYRK-4
+occupations across all, private, state and municipal sectors.
+
+Import NAV market-capacity signals from the latest public Excel attachments on
+nav.no:
+
+```bash
+python scripts/apply_migrations.py
+python scripts/import_nav_market_stats.py --dataset all
+```
+
+Validate without writing:
+
+```bash
+python scripts/import_nav_market_stats.py --dataset all --dry-run
+```
+
+The NAV importer discovers the current attachment URLs from nav.no, downloads
+the Excel files to ignored local cache `data/raw/nav/`, imports the latest
+monthly unemployment/vacancy files and the latest annual Bedriftsundersøkelsen
+workbook, and stores file checksums for traceability.
+
+For NHO, if an already imported year is corrected, replace only that year:
 
 ```bash
 python scripts/import_nho_kompetansebarometer.py \
