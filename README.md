@@ -217,12 +217,21 @@ materialized STYRK market-capacity snapshot:
 supabase.rpc("get_public_market_capacity_overview", {
   segment: "shortage", // shortage | unemployed | vacancies | tightness | salary
   result_limit: 8,
+  filter_region_code: null,
+  filter_industry_slug: "bygg_anlegg",
 })
 ```
 
-The RPC returns `items`, `source_periods`, `source_line_parts`, source metadata
-and confidence notes. Refresh the materialized snapshot after NAV or SSB salary
-imports; the bundled import scripts do this automatically.
+The RPC returns `items`, `applied_filters`, `scope`, `scope_note`,
+`source_periods`, `source_line_parts`, source metadata and confidence notes.
+Industry filters narrow the occupation list through the ESCO/STYRK industry
+mapping. Region filters use regional NAV unemployment only where it is available
+at a sufficiently detailed occupation level; broad regional NAV groups are
+returned separately as `regional_unemployment_groups` so the UI can show them
+without treating them as exact STYRK-4 occupation counts. Shortage, vacancy and
+salary signals are national unless the item scope says otherwise. Refresh the
+materialized snapshot after NAV or SSB salary imports; the bundled import scripts
+do this automatically.
 
 Use `get_career_direction_explorer` after the user searches for or selects a
 specific occupation/competence:
