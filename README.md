@@ -139,8 +139,9 @@ experience:
 - `industries`: matched industries and national SSB industry signals
 - `geography`: regional SSB signals; accepts SSB municipality codes like `K-0301`
   or two-digit county prefixes like `03`
-- `nearby_occupations`: transferable career paths based on ESCO skill overlap
-- `visualization`: chart-ready demand bars, skill counts, region ranking and related network
+- `nearby_occupations`: transferable career paths with skill overlap, market signal and opportunity quadrant
+- `opportunity_matrix`: matrix-ready items that combine market signal and competence overlap
+- `visualization`: chart-ready demand bars, skill counts, region ranking, related network and opportunity matrix
 - `data_sources` and `confidence_notes`: source provenance and interpretation caveats
 
 The lower-level `get_public_career_compass` RPC is still available as a raw

@@ -28,6 +28,7 @@ declare
   industry_signal_cards jsonb;
   region_cards jsonb;
   related_cards jsonb;
+  opportunity_matrix jsonb;
   employer_signals jsonb;
   competence_field_signals jsonb;
   demand_bars jsonb;
@@ -278,20 +279,134 @@ begin
   select coalesce(
     jsonb_agg(
       jsonb_build_object(
-        'occupation_uri', related->>'occupation_uri',
-        'title', coalesce(related->>'title_no', related->>'title_en'),
-        'overlap_count', nullif(related->>'overlap_count', '')::integer,
-        'overlap_score', nullif(related->>'overlap_score', '')::numeric,
-        'industry_names', coalesce(related->'industry_names', '[]'::jsonb),
-        'shared_skills', coalesce(related->'shared_skills', '[]'::jsonb)
+        'occupation_uri', opportunity.occupation_uri,
+        'title', opportunity.title,
+        'overlap_count', opportunity.overlap_count,
+        'overlap_score', opportunity.overlap_score,
+        'overlap_index', opportunity.overlap_score,
+        'market_signal_score', opportunity.market_signal_score,
+        'market_signal_level', opportunity.market_signal_level,
+        'opportunity_score', opportunity.opportunity_score,
+        'opportunity_level', opportunity.opportunity_level,
+        'quadrant', opportunity.quadrant,
+        'quadrant_label', opportunity.quadrant_label,
+        'industry_names', opportunity.industry_names,
+        'shared_skills', opportunity.shared_skills,
+        'market_signal', opportunity.market_signal,
+        'regional_signal', opportunity.regional_signal,
+        'matrix', jsonb_build_object(
+          'x', opportunity.market_signal_score,
+          'y', least(opportunity.overlap_score, 100),
+          'x_label', 'Markedssignal',
+          'y_label', 'Kompetanseoverlapp',
+          'size', opportunity.overlap_count
+        )
       )
-      order by nullif(related->>'overlap_score', '')::numeric desc nulls last,
-               nullif(related->>'overlap_count', '')::integer desc nulls last
+      order by opportunity.opportunity_score desc nulls last,
+               opportunity.overlap_score desc nulls last,
+               opportunity.overlap_count desc nulls last
     ),
     '[]'::jsonb
   )
   into related_cards
-  from jsonb_array_elements(coalesce(compass->'related_occupations', '[]'::jsonb)) as related_items(related);
+  from (
+    select
+      related->>'occupation_uri' as occupation_uri,
+      coalesce(related->>'title_no', related->>'title_en') as title,
+      nullif(related->>'overlap_count', '')::integer as overlap_count,
+      nullif(related->>'overlap_score', '')::numeric as overlap_score,
+      ms.market_signal_score,
+      ms.market_signal_level,
+      round(
+        case
+          when ms.market_signal_score is null then least(nullif(related->>'overlap_score', '')::numeric, 100)
+          else (
+            (least(nullif(related->>'overlap_score', '')::numeric, 100) * 0.55)
+            + (ms.market_signal_score * 0.45)
+          )
+        end::numeric,
+        2
+      ) as opportunity_score,
+      case
+        when ms.market_signal_score is null then 'unknown'
+        when (
+          (least(nullif(related->>'overlap_score', '')::numeric, 100) * 0.55)
+          + (ms.market_signal_score * 0.45)
+        ) >= 70 then 'high'
+        when (
+          (least(nullif(related->>'overlap_score', '')::numeric, 100) * 0.55)
+          + (ms.market_signal_score * 0.45)
+        ) >= 40 then 'medium'
+        else 'low'
+      end as opportunity_level,
+      case
+        when ms.market_signal_score is null then 'missing_market_signal'
+        when nullif(related->>'overlap_score', '')::numeric >= 60 and ms.market_signal_score >= 60 then 'near_and_strong'
+        when nullif(related->>'overlap_score', '')::numeric < 60 and ms.market_signal_score >= 60 then 'strong_but_requires_lift'
+        when nullif(related->>'overlap_score', '')::numeric >= 60 and ms.market_signal_score < 60 then 'near_transition'
+        else 'explore_with_caution'
+      end as quadrant,
+      case
+        when ms.market_signal_score is null then 'Mangler markedssignal'
+        when nullif(related->>'overlap_score', '')::numeric >= 60 and ms.market_signal_score >= 60 then 'Nært og attraktivt'
+        when nullif(related->>'overlap_score', '')::numeric < 60 and ms.market_signal_score >= 60 then 'Sterkt signal, krever kompetanseløft'
+        when nullif(related->>'overlap_score', '')::numeric >= 60 and ms.market_signal_score < 60 then 'Nær overgang'
+        else 'Verdt å undersøke'
+      end as quadrant_label,
+      coalesce(related->'industry_names', '[]'::jsonb) as industry_names,
+      coalesce(related->'shared_skills', '[]'::jsonb) as shared_skills,
+      case
+        when ms.occupation_uri is null then '{}'::jsonb
+        else jsonb_build_object(
+          'score', ms.market_signal_score,
+          'level', ms.market_signal_level,
+          'latest_year', ms.latest_period_year,
+          'employed_latest', ms.employed_latest_thousands,
+          'percent_change', ms.percent_change,
+          'source', 'Statistisk sentralbyrå'
+        )
+      end as market_signal,
+      case
+        when regional.region_code is null then null
+        else jsonb_build_object(
+          'region_code', regional.region_code,
+          'region_label', regional.region_label,
+          'relevance_score', regional.relevance_score,
+          'employed_latest', regional.employed_latest,
+          'percent_change', regional.percent_change,
+          'latest_year', regional.latest_period_year
+        )
+      end as regional_signal
+    from jsonb_array_elements(coalesce(compass->'related_occupations', '[]'::jsonb)) as related_items(related)
+    left join public.v_occupation_market_signals ms
+      on ms.occupation_uri = related->>'occupation_uri'
+    left join lateral (
+      select *
+      from public.v_occupation_regional_signals rs
+      where rs.occupation_uri = related->>'occupation_uri'
+        and (
+          filter_region_code is null
+          or length(trim(filter_region_code)) = 0
+          or rs.region_code = filter_region_code
+          or (
+            filter_region_code ~ '^[0-9]{2}$'
+            and rs.region_code like ('K-' || filter_region_code || '%')
+          )
+        )
+      order by rs.relevance_score desc nulls last, rs.employed_latest desc nulls last
+      limit 1
+    ) regional on true
+    where (
+      filter_industry_slug is null
+      or length(trim(filter_industry_slug)) = 0
+      or exists (
+        select 1
+        from public.occupation_industries oi
+        where oi.occupation_uri = related->>'occupation_uri'
+          and oi.industry_slug = filter_industry_slug
+      )
+    )
+  ) opportunity;
 
   select coalesce(
     jsonb_agg(
@@ -360,14 +475,40 @@ begin
   into demand_bars
   from (
     values
-      (1, 'ssb_occupation_market', 'SSB yrkesmarked', market_score, 'SSB 09793', 'Sysselsetting og utvikling i relevant STYRK-yrkesgruppe.'),
-      (2, 'nho_unmet_need', 'NHO udekket behov', nho_unmet_score, 'NHO Kompetansebarometeret', 'Andel arbeidsgivere som melder udekket kompetansebehov i relevante bransjer/regioner.'),
-      (3, 'nho_competence_need', 'NHO kompetanseområder', nho_competence_score, 'NHO Kompetansebarometeret', 'Sterkeste relevante signal for fagområde eller utdanningsnivå.')
+      (1, 'ssb_occupation_market', 'Sysselsetting i yrket', market_score, 'Statistisk sentralbyrå', 'Utvikling i sysselsetting for relevante yrker.'),
+      (2, 'nho_unmet_need', 'Arbeidsgiveres kompetansebehov', nho_unmet_score, 'NHO Kompetansebarometeret', 'Andel arbeidsgivere som melder udekket kompetansebehov i relevante bransjer eller områder.'),
+      (3, 'nho_competence_need', 'Etterspurte kompetanseområder', nho_competence_score, 'NHO Kompetansebarometeret', 'Fagområder og utdanningsnivåer arbeidsgivere oppgir behov for.')
   ) bars(sort_order, bar_key, label, value, source, description)
   where value is not null;
 
   top_region := region_cards->0;
   top_industry := industry_cards->0;
+
+  opportunity_matrix := jsonb_build_object(
+    'title', 'Mulighetsmatrise',
+    'description', 'Kombinerer kompetanseoverlapp med markedssignal for nærliggende yrker.',
+    'x_axis', jsonb_build_object(
+      'key', 'market_signal_score',
+      'label', 'Markedssignal',
+      'min', 0,
+      'max', 100
+    ),
+    'y_axis', jsonb_build_object(
+      'key', 'overlap_index',
+      'label', 'Kompetanseoverlapp',
+      'min', 0,
+      'max', 100,
+      'note', 'Overlappindeks normaliseres til 100 i visualisering, men rå indeks beholdes i kortene.'
+    ),
+    'quadrants', jsonb_build_array(
+      jsonb_build_object('key', 'near_and_strong', 'label', 'Nært og attraktivt', 'description', 'Høy kompetanseoverlapp og sterkt markedssignal.'),
+      jsonb_build_object('key', 'strong_but_requires_lift', 'label', 'Sterkt signal, krever kompetanseløft', 'description', 'Sterkt markedssignal, men lavere kompetanseoverlapp.'),
+      jsonb_build_object('key', 'near_transition', 'label', 'Nær overgang', 'description', 'Høy kompetanseoverlapp, men svakere markedssignal.'),
+      jsonb_build_object('key', 'explore_with_caution', 'label', 'Verdt å undersøke', 'description', 'Lavere signal eller lavere overlapp i datagrunnlaget.'),
+      jsonb_build_object('key', 'missing_market_signal', 'label', 'Mangler markedssignal', 'description', 'Yrket mangler nok markedssignal til å plasseres trygt.')
+    ),
+    'items', related_cards
+  );
 
   select coalesce(jsonb_agg(message), '[]'::jsonb)
   into insight_messages
@@ -376,28 +517,36 @@ begin
       (
         case
           when overall_score is not null
-            then format('Samlet signal er %s (%s av 100) basert på SSB og relevante NHO-signaler.', lower(overall_label_no), overall_score)
+            then format(
+              'Markedssignalet er %s. Det bygger på sysselsettingsdata og arbeidsgiveres rapporterte kompetansebehov.',
+              case overall_level
+                when 'high' then 'sterkt'
+                when 'medium' then 'moderat'
+                when 'low' then 'svakt'
+                else 'ukjent'
+              end
+            )
           else null
         end
       ),
       (
         case
           when essential_count > 0
-            then format('Yrket har %s nødvendige ESCO-kompetanser og %s tilleggskompetanser i grunnlaget.', essential_count, optional_count)
+            then format('Vi fant %s typiske må-ha-kompetanser og %s kompetanser som kan styrke profilen.', essential_count, optional_count)
           else null
         end
       ),
       (
         case
           when top_region is not null
-            then format('Sterkeste regionale signal i resultatet er %s.', top_region->>'region_label')
+            then format('Blant områdene i datagrunnlaget peker %s tydeligst ut for denne retningen.', trim(split_part(top_region->>'region_label', ' - ', 1)))
           else null
         end
       ),
       (
         case
           when jsonb_array_length(related_cards) > 0
-            then format('Det finnes nærliggende yrker med opptil %s prosent kompetanseoverlapp.', related_cards->0->>'overlap_score')
+            then 'Det finnes nærliggende yrker med høy kompetanseoverlapp.'
           else null
         end
       )
@@ -430,7 +579,7 @@ begin
         'title', 'ESCO occupations and skills with Norwegian STYRK aliases',
         'version', 'ESCO v1.2.1 + STYRK-08/EURES mapping',
         'metadata', jsonb_build_object(
-          'use', 'Yrkesmatch, kompetanser, nice-to-have-kompetanser og nærliggende yrker'
+          'use', 'Yrkesmatch, typiske kompetanser, profilbyggende kompetanser og nærliggende yrker'
         )
       )
     )
@@ -475,7 +624,7 @@ begin
       'learn_next', jsonb_build_object(
         'start_with', learn_start,
         'then_consider', learn_then,
-        'guidance', 'Start med nødvendige ESCO-kompetanser. Bruk tilleggskompetanser til å bygge bredde eller åpne nærliggende karriereveier.'
+        'guidance', 'Start med kompetanser som ofte er sentrale i denne rollen. Bruk tilleggskompetanser til å bygge bredde eller åpne nærliggende karriereveier.'
       )
     ),
     'industries', jsonb_build_object(
@@ -493,6 +642,7 @@ begin
       'regions', region_cards
     ),
     'nearby_occupations', related_cards,
+    'opportunity_matrix', opportunity_matrix,
     'visualization', jsonb_build_object(
       'demand_bars', demand_bars,
       'skill_counts', jsonb_build_object(
@@ -500,7 +650,8 @@ begin
         'nice_to_have', optional_count
       ),
       'region_ranking', region_cards,
-      'related_network', related_cards
+      'related_network', related_cards,
+      'opportunity_matrix', opportunity_matrix
     ),
     'data_sources', data_source_cards,
     'confidence_notes', jsonb_build_array(
