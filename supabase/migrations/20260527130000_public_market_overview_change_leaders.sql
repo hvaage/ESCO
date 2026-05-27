@@ -814,7 +814,36 @@ begin
       jsonb_build_object(
         'key', source_key,
         'provider', provider,
-        'title', title,
+        'name', case source_key
+          when 'nho_kompetansebarometeret' then 'NHO Kompetansebarometeret'
+          when 'ssb_labor_market_tables' then 'Statistisk sentralbyrå'
+          when 'nav_business_survey' then 'NAV Bedriftsundersøkelsen'
+          when 'nav_unemployment_monthly' then 'NAV helt ledige'
+          when 'nav_vacancies_monthly' then 'NAV ledige stillinger'
+          else title
+        end,
+        'title', case source_key
+          when 'nho_kompetansebarometeret' then 'NHO Kompetansebarometeret'
+          when 'ssb_labor_market_tables' then 'Statistisk sentralbyrå'
+          when 'nav_business_survey' then 'NAV Bedriftsundersøkelsen'
+          when 'nav_unemployment_monthly' then 'NAV helt ledige'
+          when 'nav_vacancies_monthly' then 'NAV ledige stillinger'
+          else title
+        end,
+        'description', case source_key
+          when 'nho_kompetansebarometeret'
+            then 'Arbeidsgiveres rapporterte kompetansebehov, fagområder og utdanningsnivåer. Dataene er aggregerte og brukes som signaler.'
+          when 'ssb_labor_market_tables'
+            then 'Sysselsetting, utvikling, regionale mønstre og lønnsstatistikk fra Statistisk sentralbyrå.'
+          when 'nav_business_survey'
+            then 'Estimert mangel på arbeidskraft basert på arbeidsgiveres rapporterte rekrutteringsutfordringer.'
+          when 'nav_unemployment_monthly'
+            then 'Registrerte helt ledige per yrke fra NAVs månedlige statistikk.'
+          when 'nav_vacancies_monthly'
+            then 'Tilgang ledige stillinger per yrke fra NAVs månedlige statistikk.'
+          else coalesce(metadata->>'description', metadata->>'use', provider)
+        end,
+        'source_url', source_url,
         'version', version,
         'imported_at', imported_at,
         'metadata', metadata
@@ -825,14 +854,23 @@ begin
   )
   into data_source_cards
   from public.external_data_sources
-  where source_key in ('ssb_labor_market_tables', 'nho_kompetansebarometeret');
+  where source_key in (
+    'ssb_labor_market_tables',
+    'nho_kompetansebarometeret',
+    'nav_business_survey',
+    'nav_unemployment_monthly',
+    'nav_vacancies_monthly'
+  );
 
   data_source_cards :=
     jsonb_build_array(
       jsonb_build_object(
         'key', 'esco_styrk',
         'provider', 'ESCO/STYRK',
+        'name', 'Yrkes- og kompetansedata med norske stillingsbetegnelser',
         'title', 'Yrkes- og kompetansedata med norske stillingsbetegnelser',
+        'description', 'ESCO gir yrker og kompetanser. STYRK-08/EURES gjør norske stillingstitler lettere å koble til ESCO-yrker.',
+        'source_url', 'https://esco.ec.europa.eu/',
         'version', 'ESCO v1.2.1 + STYRK-08/EURES mapping',
         'metadata', jsonb_build_object(
           'use', 'Stillingsmatch, typiske kompetanser og nærliggende karriereveier'
