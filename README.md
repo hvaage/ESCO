@@ -140,9 +140,12 @@ It returns a broad visual overview:
   `display_signals`, `strongest_signals`, `weakest_signals`,
   `largest_increases`, `largest_decreases` and per-signal trend fields when
   more than one NHO year has been imported
-- `industry_trends`: SSB industry employment and development signals
-- `regional_signals`: strongest municipalities/areas in the selected scope
-- `career_directions`: occupation directions that currently look worth exploring
+- `industry_trends`: SSB industry employment and development signals, including
+  `growth_leaders` and `decline_leaders`
+- `regional_signals`: strongest municipalities/areas in the selected scope,
+  including `growth_leaders` and `decline_leaders`
+- `career_directions`: occupation directions that currently look worth
+  exploring, including context-aware `growth_leaders` and `decline_leaders`
 - `competence_areas`: NHO competence fields plus sample skills from highlighted directions
 - `suggested_explorations`: CTA cards for choosing region, industry or occupation
 - `data_sources` and `confidence_notes`: source provenance and interpretation caveats
