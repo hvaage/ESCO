@@ -155,6 +155,31 @@ imported, `largest_increases` and `largest_decreases` are empty and
 `trend_available` is false. They become populated after a later NHO year is
 imported without resetting older years.
 
+Use `get_industry_skill_signals` when the UI needs competence requirements for
+the currently selected industry and/or region, independent of a single
+occupation search:
+
+```ts
+supabase.rpc("get_industry_skill_signals", {
+  filter_industry_slug: "helse_omsorg",
+  filter_region_code: "03",
+  result_limit: 24,
+})
+```
+
+It returns ESCO/STYRK occupation-skill links weighted by occupation market
+signals and, where available, regional SSB signals:
+
+- `common_requirements`: competence requirements used across many relevant occupations
+- `less_common_requirements`: narrower or more specialized requirements; do not label these as weak or unimportant
+- `essential_requirements`: ESCO essential skills weighted for the selected scope
+- `optional_requirements`: ESCO optional skills weighted for the selected scope
+
+This RPC does not count job ads. It answers which competences are attached to
+the occupations in the selected scope, with example occupations for each skill.
+Use NHO fields for employer demand signals, and use this RPC for actual
+occupation-skill requirements.
+
 Use `get_career_direction_explorer` after the user searches for or selects a
 specific occupation/competence:
 
