@@ -120,7 +120,32 @@ STYRK/EURES crosswalk; use the CSV importer for the Norwegian full version.
 
 ## Public Career Compass
 
-The public no-login teaser is exposed as a Supabase RPC:
+The public no-login teaser has two frontend-ready Supabase RPCs.
+
+Use `get_public_market_overview` before the user has selected a specific
+occupation or competence. It powers the landing-page overview for all Norway /
+all industries, and can be re-run when the user chooses region or industry:
+
+```ts
+supabase.rpc("get_public_market_overview", {
+  filter_region_code: null,
+  filter_industry_slug: null,
+})
+```
+
+It returns a broad visual overview:
+
+- `summary`: title, explanation and key insight texts
+- `employer_needs`: latest NHO Kompetansebarometeret signals
+- `industry_trends`: SSB industry employment and development signals
+- `regional_signals`: strongest municipalities/areas in the selected scope
+- `career_directions`: occupation directions that currently look worth exploring
+- `competence_areas`: NHO competence fields plus sample skills from highlighted directions
+- `suggested_explorations`: CTA cards for choosing region, industry or occupation
+- `data_sources` and `confidence_notes`: source provenance and interpretation caveats
+
+Use `get_career_direction_explorer` after the user searches for or selects a
+specific occupation/competence:
 
 ```ts
 supabase.rpc("get_career_direction_explorer", {
