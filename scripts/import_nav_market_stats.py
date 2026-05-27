@@ -892,6 +892,14 @@ def update_external_source(conn: Any, attachment: Attachment, row_count: int) ->
     conn.commit()
 
 
+def refresh_market_capacity(conn: Any) -> None:
+    with conn.cursor() as cur:
+        cur.execute("select to_regclass('public.mv_styrk_market_capacity')")
+        if cur.fetchone()[0] is not None:
+            cur.execute("refresh materialized view public.mv_styrk_market_capacity")
+    conn.commit()
+
+
 def run_dataset(conn: Any, dataset: str, cache_dir: Path, dry_run: bool) -> tuple[int, int]:
     attachment = download_attachment(dataset, cache_dir)
     workbook = read_xlsx(attachment.content)
@@ -939,6 +947,8 @@ def main() -> int:
         for dataset in datasets:
             _, row_count = run_dataset(conn, dataset, args.cache_dir.expanduser(), args.dry_run)
             total_rows += row_count
+        if not args.dry_run:
+            refresh_market_capacity(conn)
     print(f"NAV import complete. Rows parsed: {total_rows}")
     return 0
 

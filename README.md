@@ -204,6 +204,21 @@ The same data is exposed as `v_styrk_market_capacity` and
 group level than STYRK-4; where this happens, the views prefer exact STYRK-4
 matches and otherwise fall back to conservative STYRK-prefix matches.
 
+Use `get_public_market_capacity_overview` for the front-page "Arbeidsmarkedet
+akkurat nå" section. It returns one ready-sorted list per segment, backed by a
+materialized STYRK market-capacity snapshot:
+
+```ts
+supabase.rpc("get_public_market_capacity_overview", {
+  segment: "shortage", // shortage | unemployed | vacancies | tightness | salary
+  result_limit: 8,
+})
+```
+
+The RPC returns `items`, `source_periods`, `source_line_parts`, source metadata
+and confidence notes. Refresh the materialized snapshot after NAV or SSB salary
+imports; the bundled import scripts do this automatically.
+
 Use `get_career_direction_explorer` after the user searches for or selects a
 specific occupation/competence:
 

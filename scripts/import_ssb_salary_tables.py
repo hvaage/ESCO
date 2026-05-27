@@ -278,6 +278,14 @@ def update_external_source(conn: Any, table_id: str, years: list[str], row_count
     conn.commit()
 
 
+def refresh_market_capacity(conn: Any) -> None:
+    with conn.cursor() as cur:
+        cur.execute("select to_regclass('public.mv_styrk_market_capacity')")
+        if cur.fetchone()[0] is not None:
+            cur.execute("refresh materialized view public.mv_styrk_market_capacity")
+    conn.commit()
+
+
 def main() -> int:
     args = parse_args()
     metadata = request_json(f"{SSB_API_BASE}/{args.table_id}")
@@ -309,6 +317,7 @@ def main() -> int:
         import_metadata(conn, args.table_id, metadata, years)
         import_observations(conn, rows)
         update_external_source(conn, args.table_id, years, len(rows))
+        refresh_market_capacity(conn)
 
     print("SSB salary table imported.")
     return 0
