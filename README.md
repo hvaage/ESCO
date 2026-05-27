@@ -343,6 +343,13 @@ the Excel files to ignored local cache `data/raw/nav/`, imports the latest
 monthly unemployment/vacancy files and the latest annual Bedriftsundersøkelsen
 workbook, and stores file checksums for traceability.
 
+The GitHub Actions workflow `.github/workflows/nav-monthly-market-stats.yml`
+runs the monthly NAV unemployment and vacancy imports during the first five
+mornings of each month. Add the repository secret `SUPABASE_DATABASE_URL` with
+the Supabase Postgres connection string before enabling the workflow. The import
+is idempotent: source files are tracked by checksum and observations by stable
+keys, so repeated runs update existing rows instead of duplicating them.
+
 For NHO, if an already imported year is corrected, replace only that year:
 
 ```bash

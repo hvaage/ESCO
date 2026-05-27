@@ -1,0 +1,49 @@
+name: Import NAV monthly market stats
+
+on:
+  workflow_dispatch:
+  schedule:
+    # NAV monthly labour-market statistics are usually published near month-end.
+    # Run during the first five mornings of each month to catch moved publication
+    # dates; imports are idempotent through source checksums and observation keys.
+    - cron: "30 8 1-5 * *"
+
+concurrency:
+  group: nav-monthly-market-stats
+  cancel-in-progress: false
+
+jobs:
+  import-nav-monthly-market-stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Verify database secret
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "SUPABASE_DATABASE_URL GitHub secret is required." >&2
+            exit 2
+          fi
+
+      - name: Apply migrations
+        run: python scripts/apply_migrations.py
+
+      - name: Import NAV helt ledige
+        run: python scripts/import_nav_market_stats.py --dataset unemployment
+
+      - name: Import NAV ledige stillinger
+        run: python scripts/import_nav_market_stats.py --dataset vacancies
