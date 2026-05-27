@@ -136,13 +136,21 @@ supabase.rpc("get_public_market_overview", {
 It returns a broad visual overview:
 
 - `summary`: title, explanation and key insight texts
-- `employer_needs`: latest NHO Kompetansebarometeret signals
+- `employer_needs`: latest NHO Kompetansebarometeret signals, including
+  `display_signals`, `strongest_signals`, `weakest_signals`,
+  `largest_increases`, `largest_decreases` and per-signal trend fields when
+  more than one NHO year has been imported
 - `industry_trends`: SSB industry employment and development signals
 - `regional_signals`: strongest municipalities/areas in the selected scope
 - `career_directions`: occupation directions that currently look worth exploring
 - `competence_areas`: NHO competence fields plus sample skills from highlighted directions
 - `suggested_explorations`: CTA cards for choosing region, industry or occupation
 - `data_sources` and `confidence_notes`: source provenance and interpretation caveats
+
+NHO trend fields are intentionally historical. With only the 2025 package
+imported, `largest_increases` and `largest_decreases` are empty and
+`trend_available` is false. They become populated after a later NHO year is
+imported without resetting older years.
 
 Use `get_career_direction_explorer` after the user searches for or selects a
 specific occupation/competence:
