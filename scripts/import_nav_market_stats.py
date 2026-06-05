@@ -10,9 +10,11 @@ import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, unquote
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
@@ -68,6 +70,10 @@ XLSX_NS = {
 }
 RELS_NS = {"rel": "http://schemas.openxmlformats.org/package/2006/relationships"}
 CHUNK_SIZE = 2000
+FETCH_ATTEMPTS = 6
+FETCH_INITIAL_BACKOFF_SECONDS = 3.0
+FETCH_MAX_BACKOFF_SECONDS = 45.0
+TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 
 @dataclass(frozen=True)
@@ -117,9 +123,35 @@ def chunks(rows: list[dict[str, Any]], size: int = CHUNK_SIZE) -> Iterable[list[
 
 
 def fetch_bytes(url: str) -> bytes:
-    request = Request(url, headers={"User-Agent": "karrierenmin-data-import/1.0"})
-    with urlopen(request, timeout=60) as response:
-        return response.read()
+    last_error: Exception | None = None
+
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        request = Request(url, headers={"User-Agent": "karrierenmin-data-import/1.0"})
+        try:
+            with urlopen(request, timeout=60) as response:
+                return response.read()
+        except HTTPError as exc:
+            if exc.code not in TRANSIENT_HTTP_STATUSES or attempt == FETCH_ATTEMPTS:
+                raise
+            last_error = exc
+        except (URLError, TimeoutError, ConnectionResetError) as exc:
+            if attempt == FETCH_ATTEMPTS:
+                raise
+            last_error = exc
+
+        sleep_seconds = min(
+            FETCH_MAX_BACKOFF_SECONDS,
+            FETCH_INITIAL_BACKOFF_SECONDS * (2 ** (attempt - 1)),
+        )
+        print(
+            f"Transient NAV download error for {url} "
+            f"(attempt {attempt}/{FETCH_ATTEMPTS}): {last_error}. "
+            f"Retrying in {sleep_seconds:.0f}s...",
+            file=sys.stderr,
+        )
+        time.sleep(sleep_seconds)
+
+    raise RuntimeError(f"Could not download {url}: {last_error}")
 
 
 def fetch_text(url: str) -> str:
