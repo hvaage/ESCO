@@ -266,14 +266,14 @@ Import the local SSB JSON-stat2 exports after migrations:
 ```bash
 python scripts/apply_migrations.py
 python scripts/import_ssb_career_signals.py \
-  --source-dir /Users/henrikvaage/Downloads/norwegian-career-intelligence/data/raw/ssb
+  --source-dir /Users/henrikvaage/Documents/Git-repoer/norwegian-career-intelligence/data/raw/ssb
 ```
 
 Validate without writing:
 
 ```bash
 python scripts/import_ssb_career_signals.py \
-  --source-dir /Users/henrikvaage/Downloads/norwegian-career-intelligence/data/raw/ssb \
+  --source-dir /Users/henrikvaage/Documents/Git-repoer/norwegian-career-intelligence/data/raw/ssb \
   --dry-run
 ```
 
