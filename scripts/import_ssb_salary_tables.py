@@ -364,9 +364,20 @@ def update_external_source(conn: Any, table_id: str, years: list[str], row_count
 
 def refresh_market_capacity(conn: Any) -> None:
     with conn.cursor() as cur:
-        cur.execute("select to_regclass('public.mv_styrk_market_capacity')")
-        if cur.fetchone()[0] is not None:
+        cur.execute(
+            """
+            select c.relkind
+            from pg_class c
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public'
+              and c.relname = 'mv_styrk_market_capacity'
+            """
+        )
+        row = cur.fetchone()
+        if row is not None and row[0] == "m":
             cur.execute("refresh materialized view public.mv_styrk_market_capacity")
+        elif row is not None:
+            raise RuntimeError("public.mv_styrk_market_capacity exists but is not a materialized view")
     conn.commit()
 
 

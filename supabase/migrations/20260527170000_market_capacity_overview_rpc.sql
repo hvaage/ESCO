@@ -1,4 +1,26 @@
-drop materialized view if exists public.mv_styrk_market_capacity;
+do $$
+declare
+  existing_relkind char;
+begin
+  select c.relkind
+  into existing_relkind
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  where n.nspname = 'public'
+    and c.relname = 'mv_styrk_market_capacity';
+
+  if existing_relkind is not null then
+    if existing_relkind = 'm' then
+      drop materialized view public.mv_styrk_market_capacity cascade;
+    elsif existing_relkind = 'v' then
+      drop view public.mv_styrk_market_capacity cascade;
+    else
+      raise exception 'public.mv_styrk_market_capacity exists with unsupported relkind %', existing_relkind;
+    end if;
+  end if;
+end;
+$$;
+
 create materialized view public.mv_styrk_market_capacity as
 select *
 from public.v_styrk_market_capacity;
