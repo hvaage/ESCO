@@ -1,0 +1,63 @@
+name: Import SSB industry benchmark tables
+
+on:
+  workflow_dispatch:
+    inputs:
+      table_id:
+        description: Optional single SSB table id to import
+        required: false
+        type: string
+      all_years:
+        description: Import all available years for the selected table set
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # SSB tables are annual, but publication dates vary. A monthly idempotent
+    # check catches new vintages without reimporting unnecessary history.
+    - cron: "20 7 14 * *"
+
+concurrency:
+  group: ssb-industry-benchmark-tables
+  cancel-in-progress: false
+
+jobs:
+  import-ssb-industry-benchmark-tables:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Verify database secret
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "SUPABASE_DATABASE_URL GitHub secret is required." >&2
+            exit 2
+          fi
+
+      - name: Apply migrations
+        run: python scripts/apply_migrations.py
+
+      - name: Import SSB industry benchmark tables
+        run: |
+          args=()
+          if [ -n "${{ github.event.inputs.table_id }}" ]; then
+            args+=(--table-id "${{ github.event.inputs.table_id }}")
+          fi
+          if [ "${{ github.event.inputs.all_years }}" = "true" ]; then
+            args+=(--all-years)
+          fi
+          python scripts/import_ssb_industry_benchmark_tables.py "${args[@]}"
