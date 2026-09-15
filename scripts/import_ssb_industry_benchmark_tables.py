@@ -25,8 +25,7 @@ from dotenv import load_dotenv
 SSB_API_BASE = "https://data.ssb.no/api/v0/no/table"
 CHUNK_SIZE = 2000
 WRITE_CHUNK_SIZE = 10000
-SOURCE_KEY = "ssb_industry_benchmark_tables"
-DEFAULT_TABLE_IDS = [
+PHASE1_TABLE_IDS = [
     "NokkelASAlle",
     "RegnResultASAlle",
     "RegnBalansASAlle",
@@ -35,12 +34,21 @@ DEFAULT_TABLE_IDS = [
     "Foretak18",
     "Fordem10",
 ]
+NAERINGER_TABLE_IDS = [
+    "Naringer01",
+    "Naringer02",
+    "Naringer03",
+    "Naringer04",
+]
+DEFAULT_TABLE_IDS = PHASE1_TABLE_IDS + NAERINGER_TABLE_IDS
 
 
 @dataclass(frozen=True)
 class TableConfig:
     description: str
     dimension_selector: Callable[[dict[str, Any], list[str]], dict[str, list[str]]]
+    source_key: str
+    source_title: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,7 +57,13 @@ def parse_args() -> argparse.Namespace:
         "--table-id",
         action="append",
         choices=DEFAULT_TABLE_IDS,
-        help="SSB table to import. May be repeated. Defaults to all phase-1 tables.",
+        help="SSB table to import. May be repeated. Defaults to all configured tables.",
+    )
+    parser.add_argument(
+        "--group",
+        choices=["phase1", "naeringer", "all"],
+        default="all",
+        help="Table group to import when --table-id is not set. Defaults to all.",
     )
     parser.add_argument(
         "--year",
@@ -187,34 +201,115 @@ def select_fordem10(metadata: dict[str, Any], years: list[str]) -> dict[str, lis
     }
 
 
+def select_naeringer01(metadata: dict[str, Any], years: list[str]) -> dict[str, list[str]]:
+    return {
+        "NACE2007": all_values(metadata, "NACE2007"),
+        "SyssGrp": all_values(metadata, "SyssGrp"),
+        "ContentsCode": all_values(metadata, "ContentsCode"),
+        "Tid": years,
+    }
+
+
+def select_naeringer02(metadata: dict[str, Any], years: list[str]) -> dict[str, list[str]]:
+    return {
+        "NACE2007": all_values(metadata, "NACE2007"),
+        "Enhet": require_selected(metadata, "Enhet", ["1"]),
+        "ContentsCode": all_values(metadata, "ContentsCode"),
+        "Tid": years,
+    }
+
+
+def select_naeringer03(metadata: dict[str, Any], years: list[str]) -> dict[str, list[str]]:
+    return {
+        "SyssGrp": all_values(metadata, "SyssGrp"),
+        "Enhet": require_selected(metadata, "Enhet", ["1"]),
+        "NACE2007": all_values(metadata, "NACE2007"),
+        "ContentsCode": all_values(metadata, "ContentsCode"),
+        "Tid": years,
+    }
+
+
+def select_naeringer04(metadata: dict[str, Any], years: list[str]) -> dict[str, list[str]]:
+    return {
+        "Region": all_values(metadata, "Region"),
+        "NACE2007": all_values(metadata, "NACE2007"),
+        "ContentsCode": all_values(metadata, "ContentsCode"),
+        "Tid": years,
+    }
+
+
+PHASE1_SOURCE_KEY = "ssb_industry_benchmark_tables"
+PHASE1_SOURCE_TITLE = "SSB industry benchmark tables for company analytics"
+NAERINGER_SOURCE_KEY = "ssb_naeringenes_okonomiske_utvikling"
+NAERINGER_SOURCE_TITLE = "SSB Næringenes økonomiske utvikling tables for company analytics"
+
+
 TABLE_CONFIGS: dict[str, TableConfig] = {
     "NokkelASAlle": TableConfig(
         "Industry key ratios for non-financial limited companies",
         select_accounting_table,
+        PHASE1_SOURCE_KEY,
+        PHASE1_SOURCE_TITLE,
     ),
     "RegnResultASAlle": TableConfig(
         "Industry result-statement posts for limited companies",
         select_accounting_table,
+        PHASE1_SOURCE_KEY,
+        PHASE1_SOURCE_TITLE,
     ),
     "RegnBalansASAlle": TableConfig(
         "Industry balance-sheet posts for limited companies",
         select_accounting_table,
+        PHASE1_SOURCE_KEY,
+        PHASE1_SOURCE_TITLE,
     ),
     "Foretak03": TableConfig(
         "Enterprises by industry, version and size",
         select_foretak03,
+        PHASE1_SOURCE_KEY,
+        PHASE1_SOURCE_TITLE,
     ),
     "Foretak05": TableConfig(
         "Enterprises by industry, organisation form, sector and size",
         select_foretak05,
+        PHASE1_SOURCE_KEY,
+        PHASE1_SOURCE_TITLE,
     ),
     "Foretak18": TableConfig(
         "Enterprises by region, industry, organisation form and size",
         select_foretak18,
+        PHASE1_SOURCE_KEY,
+        PHASE1_SOURCE_TITLE,
     ),
     "Fordem10": TableConfig(
         "High-growth enterprises and gazelles by industry and growth type",
         select_fordem10,
+        PHASE1_SOURCE_KEY,
+        PHASE1_SOURCE_TITLE,
+    ),
+    "Naringer01": TableConfig(
+        "Preliminary enterprises, employment and turnover by industry and employment group",
+        select_naeringer01,
+        NAERINGER_SOURCE_KEY,
+        NAERINGER_SOURCE_TITLE,
+    ),
+    "Naringer02": TableConfig(
+        "Main figures for enterprises by detailed industry",
+        select_naeringer02,
+        NAERINGER_SOURCE_KEY,
+        NAERINGER_SOURCE_TITLE,
+    ),
+    "Naringer03": TableConfig(
+        "Main figures for enterprises by employment group and industry",
+        select_naeringer03,
+        NAERINGER_SOURCE_KEY,
+        NAERINGER_SOURCE_TITLE,
+    ),
+    "Naringer04": TableConfig(
+        "Main figures for establishments by region and industry",
+        select_naeringer04,
+        NAERINGER_SOURCE_KEY,
+        NAERINGER_SOURCE_TITLE,
     ),
 }
 
@@ -406,7 +501,16 @@ def import_observations(conn: Any, rows: list[dict[str, Any]]) -> None:
         conn.commit()
 
 
+def source_table_ids(source_key: str) -> list[str]:
+    return [
+        table_id
+        for table_id in DEFAULT_TABLE_IDS
+        if TABLE_CONFIGS[table_id].source_key == source_key
+    ]
+
+
 def upsert_external_source(conn: Any, table_id: str, years: list[str], row_count: int) -> None:
+    config = TABLE_CONFIGS[table_id]
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -416,7 +520,7 @@ def upsert_external_source(conn: Any, table_id: str, years: list[str], row_count
             values (
               %s,
               'SSB',
-              'SSB industry benchmark tables for company analytics',
+              %s,
               'https://www.ssb.no/',
               %s,
               'Norwegian Licence for Open Government Data (NLOD)',
@@ -452,9 +556,10 @@ def upsert_external_source(conn: Any, table_id: str, years: list[str], row_count
               )
             """,
             (
-                SOURCE_KEY,
+                config.source_key,
+                config.source_title,
                 max(years),
-                json.dumps(DEFAULT_TABLE_IDS),
+                json.dumps(source_table_ids(config.source_key)),
                 max(years),
                 table_id,
                 json.dumps(years),
@@ -487,7 +592,14 @@ def import_table(table_id: str, args: argparse.Namespace, conn: Any | None) -> i
 
 def main() -> int:
     args = parse_args()
-    table_ids = args.table_id or DEFAULT_TABLE_IDS
+    if args.table_id:
+        table_ids = args.table_id
+    elif args.group == "phase1":
+        table_ids = PHASE1_TABLE_IDS
+    elif args.group == "naeringer":
+        table_ids = NAERINGER_TABLE_IDS
+    else:
+        table_ids = DEFAULT_TABLE_IDS
 
     conn = None
     if not args.dry_run:

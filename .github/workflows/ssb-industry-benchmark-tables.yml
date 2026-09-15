@@ -7,6 +7,15 @@ on:
         description: Optional single SSB table id to import
         required: false
         type: string
+      group:
+        description: Table group to import when table_id is empty
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - phase1
+          - naeringer
       all_years:
         description: Import all available years for the selected table set
         required: false
@@ -16,6 +25,10 @@ on:
     # SSB tables are annual, but publication dates vary. A monthly idempotent
     # check catches new vintages without reimporting unnecessary history.
     - cron: "20 7 14 * *"
+    # Temporary catch-up checks for SSB's September 2026 publications:
+    # 25 Sep: Regnskap for ikke-finansielle aksjeselskaper 2025.
+    # 29 Sep: Føretak 2024.
+    - cron: "20 7 26,30 9 *"
 
 concurrency:
   group: ssb-industry-benchmark-tables
@@ -56,6 +69,8 @@ jobs:
           args=()
           if [ -n "${{ github.event.inputs.table_id }}" ]; then
             args+=(--table-id "${{ github.event.inputs.table_id }}")
+          elif [ -n "${{ github.event.inputs.group }}" ]; then
+            args+=(--group "${{ github.event.inputs.group }}")
           fi
           if [ "${{ github.event.inputs.all_years }}" = "true" ]; then
             args+=(--all-years)
