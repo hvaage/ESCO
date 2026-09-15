@@ -42,19 +42,40 @@ jobs:
       DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
 
     steps:
+      - name: Decide whether this scheduled import should run
+        id: run_window
+        shell: bash
+        run: |
+          should_run=true
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "${{ github.event.schedule }}" = "20 7 26,30 9 *" ]; then
+            current_date="$(date -u +%Y-%m-%d)"
+            case "$current_date" in
+              2026-09-26|2026-09-30)
+                ;;
+              *)
+                should_run=false
+                ;;
+            esac
+          fi
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
+
       - name: Check out repository
+        if: steps.run_window.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
+        if: steps.run_window.outputs.should_run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
 
       - name: Install dependencies
+        if: steps.run_window.outputs.should_run == 'true'
         run: python -m pip install -r requirements.txt
 
       - name: Verify database secret
+        if: steps.run_window.outputs.should_run == 'true'
         run: |
           if [ -z "$DATABASE_URL" ]; then
             echo "SUPABASE_DATABASE_URL GitHub secret is required." >&2
@@ -62,9 +83,11 @@ jobs:
           fi
 
       - name: Apply migrations
+        if: steps.run_window.outputs.should_run == 'true'
         run: python scripts/apply_migrations.py
 
       - name: Import SSB industry benchmark tables
+        if: steps.run_window.outputs.should_run == 'true'
         run: |
           args=()
           if [ -n "${{ github.event.inputs.table_id }}" ]; then
