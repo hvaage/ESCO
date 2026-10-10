@@ -3,10 +3,10 @@ name: Import NAV monthly market stats
 on:
   workflow_dispatch:
   schedule:
-    # NAV monthly labour-market statistics are usually published near month-end.
-    # Run during the first five mornings of each month to catch moved publication
+    # Detailed NAV occupation files can arrive after the headline publication.
+    # Run during the first twelve mornings of each month to catch moved publication
     # dates; imports are idempotent through source checksums and observation keys.
-    - cron: "30 8 1-5 * *"
+    - cron: "30 8 1-12 * *"
 
 concurrency:
   group: nav-monthly-market-stats

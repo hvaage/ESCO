@@ -370,7 +370,7 @@ monthly unemployment/vacancy files and the latest annual Bedriftsundersøkelsen
 workbook, and stores file checksums for traceability.
 
 The GitHub Actions workflow `.github/workflows/nav-monthly-market-stats.yml`
-runs the monthly NAV unemployment and vacancy imports during the first five
+runs the monthly NAV unemployment and vacancy imports during the first twelve
 mornings of each month. Add the repository secret `SUPABASE_DATABASE_URL` with
 the Supabase Postgres connection string before enabling the workflow. The import
 is idempotent: source files are tracked by checksum and observations by stable
